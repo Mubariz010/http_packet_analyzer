@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>App Architecture</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; font-size: 13px; }
+.header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+.header h1 { font-size: 15px; color: #f0f6fc; font-weight: 600; flex: 1; }
+.stat { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 6px 14px; font-size: 12px; text-align: center; }
+.stat .n { font-size: 18px; font-weight: 700; color: #58a6ff; }
+button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-family: inherit; font-size: 12px; }
+button:hover { background: #30363d; }
+.wrap { padding: 16px 20px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: 10px; margin-bottom: 20px; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px 16px; }
+.card.warn { border-color: #d29922; }
+.card .cl { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 4px; }
+.card .cv { font-size: 22px; font-weight: 700; color: #f0f6fc; }
+.card.warn .cv { color: #d29922; }
+.card .cs { font-size: 11px; color: #8b949e; margin-top: 2px; }
+.sec { margin-bottom: 20px; }
+.sec-title { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.itag { display: inline-block; border-radius: 4px; padding: 2px 9px; font-size: 11px; margin: 2px; }
+.itag.red { background: #2d1214; color: #f85149; border: 1px solid #f85149; }
+.itag.yellow { background: #2d2009; color: #d29922; border: 1px solid #d29922; }
+.itag.blue { background: #0d1926; color: #58a6ff; border: 1px solid #58a6ff; }
+.itag.green { background: #0d2119; color: #3fb950; border: 1px solid #3fb950; }
+.ep { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+.ep-header { padding: 10px 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.ep-header:hover { background: #1c2128; }
+.ep-url { color: #79c0ff; font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ep-body { padding: 10px 14px; border-top: 1px solid #21262d; display: none; }
+.ep-body.open { display: block; }
+.row { margin-bottom: 8px; }
+.row-label { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 4px; }
+.tag { display: inline-block; background: #21262d; border: 1px solid #30363d; border-radius: 3px; padding: 1px 6px; font-size: 11px; margin: 1px; }
+.tag.GET { border-color: #3fb950; color: #3fb950; }
+.tag.POST { border-color: #d29922; color: #d29922; }
+.tag.PUT { border-color: #ff7b72; color: #ff7b72; }
+.tag.DELETE { border-color: #f85149; color: #f85149; }
+.tag.auth-none { border-color: #f85149; color: #f85149; }
+.tag.auth-ok { border-color: #3fb950; color: #3fb950; }
+.empty { color: #8b949e; text-align: center; padding: 40px; }
+input { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 5px 10px; font-family: inherit; font-size: 12px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧠 App Architecture</h1>
+  <div class="stat"><div class="n" id="ac-ep">0</div><div>endpoints</div></div>
+  <div class="stat"><div class="n" id="ac-params">0</div><div>parameters</div></div>
+  <div class="stat"><div class="n" id="ac-noauth">0</div><div>no-auth POST</div></div>
+  <button onclick="load()">Refresh</button>
+  <button id="pause-btn" onclick="toggleRefresh()">Pause</button>
+  <a href="/ui" style="color:#8b949e;font-size:12px;text-decoration:none;">← Findings</a>
+</div>
+
+<div class="wrap">
+
+  <div class="cards" id="cards"></div>
+
+  <div class="sec">
+    <div class="sec-title">No auth on POST / PUT / DELETE — test these first</div>
+    <div id="ia-noauth"><span style="color:#8b949e">None found yet</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">File / path / redirect params — SSRF &amp; path traversal</div>
+    <div id="ia-file"><span style="color:#8b949e">None found yet</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">ID params — IDOR risk</div>
+    <div id="ia-id"><span style="color:#8b949e">None found yet</span></div>
+  </div>
+
+  <div class="sec">
+    <div class="sec-title">
+      All endpoints (<span id="ep-count">0</span>)
+      <input id="search" placeholder="search..." oninput="renderEndpoints()" style="margin-left:12px; width:200px;">
+    </div>
+    <div id="ep-list"><div class="empty">Browse your target — endpoints appear here.</div></div>
+  </div>
+
+</div>
+
+<script>
+let data = null;
+let expanded = new Set();
+let autoRefresh = true;
+let interval = setInterval(load, 5000);
+
+async function load() {
+  try {
+    data = await fetch('/architecture').then(r => r.json());
+    render();
+  } catch(e) {
+    console.error('fetch failed:', e);
+  }
+}
+
+function render() {
+  if (!data) return;
+
+  // Summary cards
+  document.getElementById('ac-ep').textContent = data.total_endpoints || 0;
+  document.getElementById('ac-params').textContent = Object.keys(data.parameters || {}).length;
+  document.getElementById('ac-noauth').textContent = (data.interesting?.no_auth || []).length;
+
+  const tech = (data.tech_stack || []);
+  document.getElementById('cards').innerHTML = [
+    { l:'Endpoints',    v: data.total_endpoints || 0,                          s:'discovered' },
+    { l:'Parameters',   v: Object.keys(data.parameters || {}).length,          s:'unique' },
+    { l:'No-auth POST', v: (data.interesting?.no_auth || []).length,           s:'high priority', warn: true },
+    { l:'Tech stack',   v: tech.length ? tech.join(', ') : 'unknown',          s:'detected', small: true },
+  ].map(c => `<div class="card ${c.warn?'warn':''}">
+    <div class="cl">${c.l}</div>
+    <div class="cv" style="${c.small?'font-size:13px;margin-top:4px':''}">${c.v}</div>
+    <div class="cs">${c.s}</div>
+  </div>`).join('');
+
+  // Interesting sections
+  const noAuth = data.interesting?.no_auth || [];
+  document.getElementById('ia-noauth').innerHTML = noAuth.length
+    ? noAuth.map(u => `<span class="itag red">${u}</span>`).join('')
+    : '<span style="color:#8b949e">None found yet</span>';
+
+  const fileP = data.interesting?.file_params || [];
+  document.getElementById('ia-file').innerHTML = fileP.length
+    ? fileP.map(p => `<span class="itag yellow">${p}</span>`).join('')
+    : '<span style="color:#8b949e">None found yet</span>';
+
+  const idP = data.interesting?.id_params || [];
+  document.getElementById('ia-id').innerHTML = idP.length
+    ? idP.map(p => `<span class="itag blue">${p}</span>`).join('')
+    : '<span style="color:#8b949e">None found yet</span>';
+
+  renderEndpoints();
+}
+
+function renderEndpoints() {
+  if (!data) return;
+  const search = (document.getElementById('search').value || '').toLowerCase();
+  const eps = Object.entries(data.endpoints || {}).filter(([url, d]) =>
+    url.toLowerCase().includes(search) ||
+    (d.params || []).some(p => p.toLowerCase().includes(search))
+  );
+
+  document.getElementById('ep-count').textContent = eps.length;
+
+  if (!eps.length) {
+    document.getElementById('ep-list').innerHTML = '<div class="empty">No matching endpoints</div>';
+    return;
+  }
+
+  document.getElementById('ep-list').innerHTML = eps.map(([url, d]) => {
+    const isOpen = expanded.has(url);
+    const authCls = d.auth === 'none' ? 'auth-none' : 'auth-ok';
+    const methods = (d.methods || []).map(m => `<span class="tag ${m}">${m}</span>`).join('');
+    const params  = (d.params || []).length
+      ? (d.params || []).map(p => `<span class="tag">${p}</span>`).join('')
+      : '<span style="color:#8b949e">none</span>';
+    const statuses = (d.status_codes || []).map(s => `<span class="tag">${s}</span>`).join('');
+    const tech = (d.tech || []).length
+      ? (d.tech || []).map(t => `<span class="tag">${t}</span>`).join('')
+      : '<span style="color:#8b949e">none detected</span>';
+
+    return `<div class="ep">
+      <div class="ep-header" onclick="toggle('${url}')">
+        <span class="tag auth-${d.auth === 'none' ? 'none' : 'ok'}">${d.auth}</span>
+        ${methods}
+        <span class="ep-url" title="${url}">${url}</span>
+      </div>
+      <div class="ep-body ${isOpen ? 'open' : ''}">
+        <div class="row"><div class="row-label">Parameters</div>${params}</div>
+        <div class="row"><div class="row-label">Status codes</div>${statuses}</div>
+        <div class="row"><div class="row-label">Tech</div>${tech}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggle(url) {
+  if (expanded.has(url)) expanded.delete(url);
+  else expanded.add(url);
+  renderEndpoints();
+}
+
+function toggleRefresh() {
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById('pause-btn');
+  if (autoRefresh) {
+    interval = setInterval(load, 5000);
+    btn.textContent = 'Pause';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  } else {
+    clearInterval(interval);
+    btn.textContent = 'Resume';
+    btn.style.borderColor = '#d29922';
+    btn.style.color = '#d29922';
+  }
+}
+
+load();
+</script>
+</body>
+</html>

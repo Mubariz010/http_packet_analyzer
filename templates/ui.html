@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>AI Traffic Analyzer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'SF Mono', 'Fira Code', monospace; background: #0d1117; color: #c9d1d9; font-size: 13px; }
+  .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 15px; color: #f0f6fc; font-weight: 600; }
+  .stat { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 6px 14px; font-size: 12px; }
+  .stat .n { font-size: 18px; font-weight: 700; }
+  .stat.crit .n { color: #f85149; } .stat.high .n { color: #ff7b72; }
+  .stat.med .n { color: #d29922; } .stat.low .n { color: #3fb950; }
+  .stat.info-s .n { color: #58a6ff; }
+  .controls { padding: 10px 20px; display: flex; gap: 8px; align-items: center; background: #161b22; border-bottom: 1px solid #30363d; }
+  select, input { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 5px 10px; font-family: inherit; font-size: 12px; }
+  button { background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; padding: 5px 12px; cursor: pointer; font-family: inherit; font-size: 12px; }
+  button:hover { background: #30363d; } button.danger { border-color: #f85149; color: #f85149; }
+  .findings { padding: 12px 20px; }
+  .finding { background: #161b22; border: 1px solid #30363d; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+  .finding-header { padding: 8px 14px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .finding-header:hover { background: #1c2128; }
+  .badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+  .badge.critical { background: #2d1214; color: #f85149; border: 1px solid #f85149; }
+  .badge.high { background: #2d1b18; color: #ff7b72; border: 1px solid #ff7b72; }
+  .badge.medium { background: #2d2009; color: #d29922; border: 1px solid #d29922; }
+  .badge.low { background: #0d2119; color: #3fb950; border: 1px solid #3fb950; }
+  .badge.info { background: #0d1926; color: #58a6ff; border: 1px solid #58a6ff; }
+  .badge.cat { background: #1c2128; color: #8b949e; border: 1px solid #30363d; font-weight: 400; }
+  .finding-url { color: #8b949e; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 400px; }
+  .finding-title { font-weight: 600; color: #e6edf3; flex: 1; }
+  .finding-body { padding: 10px 14px; border-top: 1px solid #21262d; display: none; }
+  .finding-body.open { display: block; }
+  .detail-row { margin-bottom: 6px; }
+  .detail-label { color: #8b949e; font-size: 11px; text-transform: uppercase; margin-bottom: 2px; }
+  .detail-val { color: #c9d1d9; }
+  .poc { background: #0d1117; border: 1px solid #30363d; border-radius: 4px; padding: 8px; color: #79c0ff; white-space: pre-wrap; font-family: monospace; }
+  .next-tests { list-style: none; }
+  .next-tests li::before { content: "→ "; color: #3fb950; }
+  .ts { color: #8b949e; font-size: 11px; }
+  .empty { color: #8b949e; text-align: center; padding: 40px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🔍 AI Traffic Analyzer</h1>
+  <div class="stat crit"><div class="n" id="s-critical">0</div><div>critical</div></div>
+  <div class="stat high"><div class="n" id="s-high">0</div><div>high</div></div>
+  <div class="stat med"><div class="n" id="s-medium">0</div><div>medium</div></div>
+  <div class="stat low"><div class="n" id="s-low">0</div><div>low</div></div>
+  <div class="stat info-s"><div class="n" id="s-info">0</div><div>info</div></div>
+  <div style="margin-left:auto; color:#8b949e; font-size:12px">
+    <span id="req-count">0</span> requests analyzed
+  </div>
+</div>
+<div class="controls">
+  <select id="filter-sev" onchange="applyFilters()">
+    <option value="">All severities</option>
+    <option value="critical">Critical</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+    <option value="info">Info</option>
+  </select>
+  <select id="filter-cat" onchange="applyFilters()">
+    <option value="">All categories</option>
+    <option value="injection">Injection</option>
+    <option value="auth">Auth</option>
+    <option value="disclosure">Disclosure</option>
+    <option value="config">Config</option>
+    <option value="idor">IDOR</option>
+    <option value="xss">XSS</option>
+    <option value="ssrf">SSRF</option>
+    <option value="crypto">Crypto</option>
+  </select>
+  <input id="filter-host" placeholder="Filter by host..." oninput="applyFilters()" style="width:200px">
+  <button onclick="clearAll()" class="danger">Clear all</button>
+  <button id="pause-btn" onclick="toggleRefresh()">Pause Auto-Refresh</button>
+  <button onclick="window.open('/arch','_blank')">App Architecture</button>
+<!-- <span style="margin-left:auto; color:#8b949e; font-size:11px">Auto-refresh every 3s</span> -->
+</div>
+<div class="findings" id="findings-list"><div class="empty">Waiting for traffic... Browse your target in Burp.</div></div>
+
+<script>
+let allFindings = [];
+let expanded = new Set();
+
+
+async function refresh() {
+  await Promise.all([fetchStats(), fetchFindings(), fetchControl()]);
+}
+
+async function fetchStats() {
+  const r = await fetch('/stats').then(r => r.json());
+  document.getElementById('s-critical').textContent = r.by_severity.critical || 0;
+  document.getElementById('s-high').textContent = r.by_severity.high || 0;
+  document.getElementById('s-medium').textContent = r.by_severity.medium || 0;
+  document.getElementById('s-low').textContent = r.by_severity.low || 0;
+  document.getElementById('s-info').textContent = r.by_severity.info || 0;
+  document.getElementById('req-count').textContent = r.requests_analyzed || 0;
+}
+
+async function fetchFindings() {
+  const sev = document.getElementById('filter-sev').value;
+  const cat = document.getElementById('filter-cat').value;
+  const host = document.getElementById('filter-host').value;
+  let url = '/findings?';
+  if (sev) url += 'severity=' + sev + '&';
+  if (cat) url += 'category=' + cat + '&';
+  if (host) url += 'host=' + encodeURIComponent(host) + '&';
+  const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  allFindings = await fetch(url).then(r => r.json());
+  allFindings.sort((a, b) => (severityOrder[a.severity] ?? 5) - (severityOrder[b.severity] ?? 5));
+  render();
+}
+
+function render() {
+  const el = document.getElementById('findings-list');
+  if (!allFindings.length) {
+    el.innerHTML = '<div class="empty">No findings yet. Browse your target.</div>';
+    return;
+  }
+  el.innerHTML = allFindings.map((f, idx) => {
+    const isOpen = expanded.has(idx);
+    const poc = f.proof_of_concept ? `<div class="detail-row"><div class="detail-label">PoC</div><div class="poc">${f.proof_of_concept}</div></div>` : '';
+    const rec = f.recommendation ? `<div class="detail-row"><div class="detail-label">Recommendation</div><div class="detail-val">${f.recommendation}</div></div>` : '';
+    const tests = f.suggested_next_tests?.length ? `<div class="detail-row"><div class="detail-label">Suggested next tests</div><ul class="next-tests">${f.suggested_next_tests.map(t => '<li>' + t + '</li>').join('')}</ul></div>` : '';
+    return `<div class="finding">
+      <div class="finding-header" onclick="toggle(${idx})">
+        <span class="badge ${f.severity}">${f.severity}</span>
+        <span class="badge cat">${f.category || 'other'}</span>
+        <span class="finding-title">${f.title}</span>
+        <span class="finding-url">${f.method || ''} ${f.url || ''}</span>
+        <span class="ts">${f.timestamp?.split('T')[1]?.slice(0,8) || ''}</span>
+      </div>
+      <div class="finding-body ${isOpen ? 'open' : ''}">
+        <div class="detail-row"><div class="detail-label">Detail</div><div class="detail-val">${f.detail}</div></div>
+        ${poc}${rec}${tests}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggle(id) {
+  if (expanded.has(id)) expanded.delete(id);
+  else expanded.add(id);
+  render();
+}
+
+function applyFilters() { fetchFindings(); }
+
+async function clearAll() {
+  if (!confirm('Clear all findings?')) return;
+  await fetch('/clear', {method:'POST'});
+  allFindings = [];
+  render();
+  fetchStats();
+}
+
+async function refresh() {
+  await Promise.all([fetchStats(), fetchFindings()]);
+}
+
+let autoRefresh = true;
+let refreshInterval = setInterval(refresh, 3000);
+
+function toggleRefresh() {
+  autoRefresh = !autoRefresh;
+  const btn = document.getElementById('pause-btn');
+  if (autoRefresh) {
+    refreshInterval = setInterval(refresh, 3000);
+    btn.textContent = 'Pause Auto-Refresh';
+    btn.style.borderColor = '';
+    btn.style.color = '';
+  } else {
+    clearInterval(refreshInterval);
+    btn.textContent = 'Resume Auto-Refresh  ';
+    btn.style.borderColor = '#d29922';
+    btn.style.color = '#d29922';
+  }
+}
+
+refresh();
+</script>
+</body>
+</html>
