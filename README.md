@@ -2,27 +2,39 @@
 
 AI-powered HTTP traffic analyzer for Burp Suite using Claude.
 
-## Requirements
-- Docker + Docker Compose
+### Requirements
+- Docker & Docker Compose
 - Burp Suite (any edition)
-- Anthropic API key
+- Jython standalone JAR ([download here](https://www.jython.org/download))
+- Anthropic API key ([get one here](https://console.anthropic.com))
 
-## Setup
+### 1. Clone the repository
+```bash
+git clone https://github.com/Mubariz010/http_packet_analyzer.git
+cd http_packet_analyzer
+```
 
-### 1. Start the AI server
+### 2. Create virtual environment
+```bash
+python3 -m venv venv
+source venv/bin/activate        # Linux/Mac/WSL
+venv\Scripts\activate           # Windows
+```
+
+
+### 3. Set up environment
 ```bash
 cp .env.example .env
-# Add your ANTHROPIC_API_KEY to .env
+# Add your API key inside `.env`:
+nano .env
+```
+
+### 4. Start the server
+```bash
 docker compose up --build
 ```
 
-### 2. Load the Burp extension
-```
-Burp → Extensions → Add → Python → burp_ai_extension.py
-```
-Requires Jython standalone JAR configured in Burp → Extensions → Options.
-
-### 3. Browse your target
+### 5. Browse your target
 Findings appear at `http://127.0.0.1:8719/ui`
 Architecture map at `http://127.0.0.1:8719/arch`
 
